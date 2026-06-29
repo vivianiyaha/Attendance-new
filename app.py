@@ -208,6 +208,25 @@ def get_approved_leaves():
 def is_rainy_day(filename: str) -> bool:
     return "rainy day" in filename.lower()
 
+def get_all_attendance_files():
+    """Return all CSV files inside month subfolders of daily-attendance/.
+    Structure: daily-attendance/<MonthFolder>/<file>.csv
+    Falls back to direct CSVs in daily-attendance/ if no subfolders exist.
+    """
+    # Collect from month subfolders first
+    files = []
+    for sub in sorted(DAILY_DIR.iterdir()):
+        if sub.is_dir():
+            files.extend(sorted(sub.glob("*.csv")))
+    # Fallback: flat files directly in daily-attendance/
+    if not files:
+        files = sorted(DAILY_DIR.glob("*.csv"))
+    return files
+
+def get_month_folders():
+    """Return sorted list of month subdirectory names inside daily-attendance/."""
+    return sorted([d.name for d in DAILY_DIR.iterdir() if d.is_dir()])
+
 # ─── SIDEBAR ────────────────────────────────────────────────────────────────
 with st.sidebar:
     st.markdown("## 👥 HR System")
@@ -231,7 +250,7 @@ if page == "Dashboard":
     st.markdown('<div class="page-subtitle">Overview of employee and attendance data</div>', unsafe_allow_html=True)
 
     emp_df       = load_employees()
-    att_files    = list(DAILY_DIR.glob("*.csv"))
+    att_files    = get_all_attendance_files()
     leave_files  = list(LEAVE_DIR.glob("*.csv"))
 
     c1, c2, c3 = st.columns(3)
@@ -255,13 +274,26 @@ elif page == "Attendance Reports":
     st.markdown('<div class="page-title">Attendance Reports</div>', unsafe_allow_html=True)
     st.markdown('<div class="page-subtitle">Analyse daily attendance records</div>', unsafe_allow_html=True)
 
-    att_files = sorted(DAILY_DIR.glob("*.csv"), key=lambda f: f.name)
-    if not att_files:
-        st.markdown('<div class="info-box">No attendance files found in <b>daily-attendance/</b> folder.</div>', unsafe_allow_html=True)
-        st.stop()
+    month_folders = get_month_folders()
+    if not month_folders:
+        # Fallback: try flat files
+        att_files = sorted(DAILY_DIR.glob("*.csv"), key=lambda f: f.name)
+        if not att_files:
+            st.markdown('<div class="info-box">No attendance files found. Create month subfolders inside <b>daily-attendance/</b> e.g. <b>daily-attendance/June/</b> and place CSV files inside.</div>', unsafe_allow_html=True)
+            st.stop()
+        chosen_folder = DAILY_DIR
+        file_names = [f.name for f in att_files]
+    else:
+        chosen_month = st.selectbox("Select Month", month_folders)
+        chosen_folder = DAILY_DIR / chosen_month
+        att_files = sorted(chosen_folder.glob("*.csv"), key=lambda f: f.name)
+        if not att_files:
+            st.markdown(f'<div class="info-box">No CSV files found in <b>daily-attendance/{chosen_month}/</b>.</div>', unsafe_allow_html=True)
+            st.stop()
+        file_names = [f.name for f in att_files]
 
-    selected_file = st.selectbox("Select Attendance File", [f.name for f in att_files])
-    chosen = DAILY_DIR / selected_file
+    selected_file = st.selectbox("Select Attendance File", file_names)
+    chosen = chosen_folder / selected_file
 
     try:
         raw = pd.read_csv(chosen)
@@ -391,9 +423,10 @@ elif page == "HR Analytics":
     all_emp     = emp_df["Name"].str.strip().tolist() if not emp_df.empty else []
     all_emp_lower = {n.lower(): n for n in all_emp}
 
-    # ── Load valid (non-rainy-day) attendance files
-    valid_files = [f for f in DAILY_DIR.glob("*.csv") if not is_rainy_day(f.name)]
-    rainy_count = len(list(DAILY_DIR.glob("*.csv"))) - len(valid_files)
+    # ── Load valid (non-rainy-day) attendance files from all month subfolders
+    all_files   = get_all_attendance_files()
+    valid_files = [f for f in all_files if not is_rainy_day(f.name)]
+    rainy_count = len(all_files) - len(valid_files)
 
     if not valid_files:
         st.markdown('<div class="info-box">No valid attendance files found (rainy-day files excluded).</div>', unsafe_allow_html=True)
